@@ -1,10 +1,13 @@
 import {PublicClientApplication, InteractionRequiredAuthError} from '@azure/msal-browser';
+import {CalendarReadError, readUpcomingEvents, formatEventDate, isWjTenantAccount} from './graph-calendar.js';
+
+const WJ_TENANT_ID = 'dcc6cd1a-0b51-4889-9c2f-e4d97c65f29d';
 
 // Public OAuth client identifiers only. No application secret is used in this SPA.
 const msal = new PublicClientApplication({
   auth: {
     clientId: '3f887f86-9c36-4dd4-83e7-857c2b231789',
-    authority: 'https://login.microsoftonline.com/dcc6cd1a-0b51-4889-9c2f-e4d97c65f29d',
+    authority: `https://login.microsoftonline.com/${WJ_TENANT_ID}`,
     redirectUri: new URL('./redirect.html', window.location.href).href,
     ...(window.self !== window.top ? {
       popupRelayUri: new URL('./popup-relay.html', window.location.href).href,
@@ -44,26 +47,30 @@ async function withBusy(task) {
   try {
     await task();
   } catch (error) {
-    // Never display an OAuth response, authorization code, access token or raw error payload.
-    report(error instanceof InteractionRequiredAuthError
-      ? 'Je Microsoft-sessie is verlopen. Klik opnieuw op Afspraken ophalen om aan te melden.'
-      : 'De actie is niet gelukt. Controleer de browserinstellingen en Microsoft-toestemming.', true);
+    // Never display a raw OAuth/Graph response, authorization code, token or URL.
+    const code = String(error?.errorCode || error?.subError || '');
+    if (error instanceof CalendarReadError) {
+      const messages = {
+        permission: 'Geen toegang tot deze agenda. Controleer de Microsoft-toestemming of meld je opnieuw aan.',
+        throttled: 'Microsoft beperkt tijdelijk het aantal aanvragen. Wacht even en probeer opnieuw.',
+        timeout: 'Het ophalen duurt te lang. Controleer de verbinding en probeer opnieuw.',
+        too_many_pages: 'De agenda bevat te veel resultaten om veilig volledig te tonen. Verkort de periode.',
+        too_many_events: 'De agenda bevat te veel afspraken om veilig volledig te tonen. Verkort de periode.',
+      };
+      report(messages[error.code] || 'De Outlook-agenda kon niet volledig worden opgehaald. Er is niets gewijzigd.', true);
+    } else if (error instanceof InteractionRequiredAuthError) {
+      report('Je Microsoft-sessie is verlopen. Klik opnieuw op Afspraken ophalen om je aan te melden.', true);
+    } else if (/consent_required|65001|90094|65004/.test(code)) {
+      report('Microsoft vereist goedkeuring van de WJ Projects-beheerder. Vraag eenmalige toestemming voor de organisatie aan.', true);
+    } else if (code === 'wrong_tenant') {
+      report('Dit account hoort niet bij de WJ Projects Microsoft 365-omgeving. Meld je aan met je werkaccount.', true);
+    } else {
+      report('De actie is niet gelukt. Controleer de browserinstellingen en Microsoft-toestemming.', true);
+    }
   } finally {
     busy = false;
     renderControls();
   }
-}
-
-function formatEventDate(dateTime, timeZone) {
-  if (!dateTime) return 'Tijd onbekend';
-  // Microsoft Graph returns timestamps without a Z when the requested Outlook time zone is used.
-  const iso = /(?:Z|[+-]\d\d:\d\d)$/i.test(dateTime) ? dateTime : `${dateTime}Z`;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return 'Tijd onbekend';
-  return new Intl.DateTimeFormat('nl-NL', {
-    timeZone: timeZone === 'UTC' ? 'UTC' : 'Europe/Amsterdam',
-    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  }).format(date);
 }
 
 function renderEvents(events) {
@@ -76,7 +83,7 @@ function renderEvents(events) {
       const startDate = event.start?.dateTime?.slice(0, 10);
       when.textContent = `${startDate ?? 'Datum onbekend'} · hele dag`;
     } else {
-      when.textContent = `${formatEventDate(event.start?.dateTime, 'UTC')} tot ${formatEventDate(event.end?.dateTime, 'UTC')}`;
+      when.textContent = `${formatEventDate(event.start?.dateTime)} tot ${formatEventDate(event.end?.dateTime)}`;
     }
     const name = document.createElement('span');
     name.className = 'subject';
@@ -100,40 +107,28 @@ async function refresh() {
   if (!signedInAccount) return;
   report('Outlook-afspraken worden opgehaald…');
   const token = await graphToken();
-  const start = new Date();
-  const end = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
-  const params = new URLSearchParams({
-    startDateTime: start.toISOString(),
-    endDateTime: end.toISOString(),
-    '$select': 'subject,start,end,isAllDay,isCancelled',
-    '$top': '50',
-    '$orderby': 'start/dateTime',
-  });
-  let next = `https://graph.microsoft.com/v1.0/me/calendarView?${params}`;
-  const events = [];
-  do {
-    const url = new URL(next);
-    if (url.origin !== 'https://graph.microsoft.com' || !url.pathname.startsWith('/v1.0/me/calendarView')) {
-      throw new Error('Onverwachte Microsoft Graph-paginering');
-    }
-    const response = await fetch(url, {
-      headers: {Authorization: `Bearer ${token}`, Accept: 'application/json'},
-      cache: 'no-store',
-    });
-    if (!response.ok) throw new Error(`Microsoft Graph HTTP ${response.status}`);
-    const data = await response.json();
-    if (!Array.isArray(data.value)) throw new Error('Ongeldig agenda-antwoord');
-    events.push(...data.value);
-    next = typeof data['@odata.nextLink'] === 'string' ? data['@odata.nextLink'] : null;
-  } while (next && events.length < 250);
-  events.sort((a, b) => (a.start?.dateTime ?? '').localeCompare(b.start?.dateTime ?? ''));
-  renderEvents(events);
-  report(events.length ? `${events.length} afspraak/afspraken opgehaald. Alleen-lezen DEV-test.` : 'Geen afspraken in de komende 14 dagen.');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const events = await readUpcomingEvents({accessToken: token, signal: controller.signal});
+    // Only render after ALL Graph pages succeed; never display a partial result as complete.
+    renderEvents(events);
+    report(events.length ? `${events.length} afspraak/afspraken opgehaald. Alleen-lezen DEV-test.` : 'Geen afspraken in de komende 14 dagen.');
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 elements.connect.addEventListener('click', () => withBusy(async () => {
   report('Microsoft-aanmelding wordt geopend…');
   const result = await msal.loginPopup({scopes: SCOPES, prompt: 'select_account'});
+  if (!isWjTenantAccount(result.account, WJ_TENANT_ID)) {
+    const failure = new Error('Andere Microsoft tenant');
+    failure.errorCode = 'wrong_tenant';
+    throw failure;
+  }
+  // Never let another Microsoft account see the previous user's calendar in this tab.
+  elements.events.replaceChildren();
   signedInAccount = result.account;
   msal.setActiveAccount(signedInAccount);
   renderControls();
@@ -146,12 +141,14 @@ elements.signout.addEventListener('click', () => withBusy(async () => {
   // Local sign-out only: do not sign the user out of other Microsoft applications.
   if (signedInAccount) await msal.clearCache({account: signedInAccount});
   signedInAccount = null;
+  msal.setActiveAccount(null);
   elements.events.replaceChildren();
   report('De lokale aanmeldsessie is gewist. Outlook blijft aangemeld.');
 }));
 
 withBusy(async () => {
   await msal.initialize();
-  signedInAccount = msal.getActiveAccount() ?? msal.getAllAccounts()[0] ?? null;
+  const candidates = [msal.getActiveAccount(), ...msal.getAllAccounts()];
+  signedInAccount = candidates.find(account => isWjTenantAccount(account, WJ_TENANT_ID)) ?? null;
   report(signedInAccount ? 'Je sessie is gevonden. Klik op Afspraken ophalen.' : 'Klik op Inloggen met Microsoft. Er worden geen agenda-afspraken gewijzigd.');
 });
