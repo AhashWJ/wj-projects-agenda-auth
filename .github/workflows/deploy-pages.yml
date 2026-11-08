@@ -1,4 +1,4 @@
-name: Publiceer Agenda DEV op GitHub Pages
+name: Publiceer WJ Projects Agenda op GitHub Pages
 
 on:
   push:
