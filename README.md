@@ -1,11 +1,11 @@
-# WJ Projects Agenda DEV, Microsoft Graph
+# WJ Projects Agenda, Microsoft Graph
 
 Afzonderlijke, openbare **alleen-lezen** technische proef van een Outlook-agendakoppeling via Microsoft Graph. De bestaande WJ Projects Airtable Agenda, productiebase, automations en persoonlijke Outlook-agenda's worden door deze applicatie niet gewijzigd.
 
-## Microsoft Entra (DEV)
+## Microsoft Entra
 
 - Tenant: WJ Projects, alleen organisatieaccounts.
-- Appnaam: `WJ Projects Agenda DEV`.
+- Beoogde appnaam: `WJ Projects Agenda` (pas deze ook afzonderlijk aan in Microsoft Entra).
 - Appregistratie: **Single-page application (SPA)**.
 - Redirect URI: `https://ahashwj.github.io/wj-projects-agenda-auth/redirect.html`
 - Delegated permissions: `User.Read`, `Calendars.Read`.
@@ -24,7 +24,7 @@ De data wordt uitsluitend direct vanuit de browser met Microsoft Graph gelezen. 
 
 ## Beperkingen
 
-- Dit is een DEV-proef buiten de bestaande Airtable Custom Element, geen volledige Outlook-vervanging en geen bidirectionele synchronisatie.
+- Dit is een alleen-lezen proef buiten de bestaande Airtable Custom Element, geen volledige Outlook-vervanging en geen bidirectionele synchronisatie.
 - Voor een productieomgeving moeten onder andere gebruikersautorisatie, privacy, beheer van agenda's, afspraakwijzigingen, Teams-integratie, wijzigingen vanuit Outlook, dubbele records, beveiligingsheaders en foutafhandeling worden ontworpen en getest.
 - Een embed in Airtable vereist een afzonderlijke browser- en Airtable SDK-test. Niet als werkend aannemen voordat dat is aangetoond.
 - GitHub Pages geeft geen volledige controle over HTTP-responsheaders. Voor een productie-login is geschikte hosting met beheersbare security headers waarschijnlijk nodig.
