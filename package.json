@@ -1,0 +1,15 @@
+{
+  "name": "wj-projects-agenda-auth-dev",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@azure/msal-browser": "5.28.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.6"
+  }
+}
