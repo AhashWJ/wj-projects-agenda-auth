@@ -113,7 +113,7 @@ async function refresh() {
     const events = await readUpcomingEvents({accessToken: token, signal: controller.signal});
     // Only render after ALL Graph pages succeed; never display a partial result as complete.
     renderEvents(events);
-    report(events.length ? `${events.length} afspraak/afspraken opgehaald. Alleen-lezen DEV-test.` : 'Geen afspraken in de komende 14 dagen.');
+    report(events.length ? `${events.length} afspraak/afspraken opgehaald. Alleen-lezen Microsoft Graph-koppeling.` : 'Geen afspraken in de komende 14 dagen.');
   } finally {
     clearTimeout(timeout);
   }
